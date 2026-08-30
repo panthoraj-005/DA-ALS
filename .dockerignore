@@ -1,0 +1,43 @@
+# --- version control & tooling ---
+.git
+.gitignore
+.github
+*.md
+!backend/requirements.txt
+
+# --- python ---
+**/__pycache__/
+**/*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/*.egg-info/
+
+# --- node ---
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+npm-debug.log*
+
+# --- secrets & local config ---
+.env
+.env.*
+!.env.example
+
+# --- large or generated artifacts ---
+models/*
+!models/.gitkeep
+!models/README.md
+outputs/
+*.ipynb
+*.ipynb_checkpoints
+
+# --- test & editor noise ---
+backend/tests/
+backend/smoke_test.py
+.DS_Store
+.idea/
+.vscode/

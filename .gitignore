@@ -1,0 +1,64 @@
+# ==============================================================================
+# Git Ignore Rules for ALS AI Screening Platform
+# ==============================================================================
+
+# Secrets & Environment Variables (NEVER COMMIT SECRETS)
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Python Bytecode & Cache
+__pycache__/
+**/*.pyc
+**/*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend Node Modules & Build Artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.tmp/
+node_modules/
+dist/
+
+# Runtime Output Images and Json (Keep folder tracked via .gitkeep)
+outputs/*
+!outputs/.gitkeep
+
+# System & OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+
+# IDE / Editor Configuration
+.vscode/
+.idea/
+*.swp
+*.swo

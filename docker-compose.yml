@@ -1,0 +1,86 @@
+# =============================================================================
+# docker compose up --build
+#
+# Serves the API and the built frontend on http://localhost:8000.
+# Put your trained artifacts in ./models before starting — the container mounts
+# them read-only, so nothing in the app can overwrite your weights.
+# =============================================================================
+
+services:
+  als-webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: als-webapp:latest
+    container_name: als-webapp
+    restart: unless-stopped
+
+    ports:
+      - "${HOST_PORT:-8000}:8000"
+
+    volumes:
+      # Weights are read-only: the app has no reason to write here, and a
+      # read-only mount means a compromised container cannot corrupt them.
+      - ./models:/app/models:ro
+      # Generated images, PDFs and result records. Written by the app, swept on
+      # a TTL. Persisted so a restart does not 404 every in-flight report link.
+      - ./outputs:/app/outputs:rw
+      - ./sample_signals:/app/sample_signals:ro
+
+    environment:
+      ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JSON_LOGS: "1"
+
+      # Same origin, so the SPA needs no cross-origin grant. Add your public
+      # origin here if you serve the frontend from somewhere else.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}
+      # Turn on only when a reverse proxy you control sets X-Forwarded-For.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-0}
+      # HSTS belongs on the TLS terminator; harmful on plain-HTTP localhost.
+      ENABLE_HSTS: ${ENABLE_HSTS:-0}
+
+      RATE_LIMIT: ${RATE_LIMIT:-20}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-60}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      ARTIFACT_TTL_MINUTES: ${ARTIFACT_TTL_MINUTES:-120}
+
+      # One worker per model copy. Raise only with the memory to back it.
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
+
+      DEVICE: ${DEVICE:-cpu}
+      ENABLE_FLORENCE: ${ENABLE_FLORENCE:-1}
+      FLORENCE_DEFAULT: ${FLORENCE_DEFAULT:-0}
+      ENABLE_LLM: ${ENABLE_LLM:-0}
+      # Set DEMO_MODE=1 to bring the stack up with no weights at all.
+      DEMO_MODE: ${DEMO_MODE:-0}
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Loading Florence-2 on a cold CPU box takes a while; do not flap.
+      start_period: 90s
+
+    deploy:
+      resources:
+        limits:
+          # Each worker holds its own model copy. 4 GB fits 2 CNN-only workers,
+          # or 1 worker with Florence-2. Raise both if you enable the VLM.
+          cpus: "${CPU_LIMIT:-2.0}"
+          memory: ${MEMORY_LIMIT:-4g}
+        reservations:
+          cpus: "${CPU_RESERVATION:-0.5}"
+          memory: ${MEMORY_RESERVATION:-1g}
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
