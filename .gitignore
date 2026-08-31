@@ -62,3 +62,6 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Backend runtime outputs
+backend/outputs/

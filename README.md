@@ -214,6 +214,19 @@ You can open and execute this notebook in **Google Colab** or locally with GPU a
 
 ---
 
+## 👥 Authors
+
+This project was designed, developed, and maintained by:
+
+| Author | GitHub |
+|---|---|
+| Panthoraj | [@panthoraj-005](https://github.com/panthoraj-005) |
+| PBS | [@pbs002-s](https://github.com/pbs002-s) |
+
+Contributions covering the multi-modal model architecture, training pipeline, FastAPI backend, and React clinical interface.
+
+---
+
 ## ⚖️ Clinical & Research Disclaimer
 
 This software is developed strictly as an **experimental research and screening aid**. It does **not** provide definitive clinical diagnoses. All predictions, probabilities, and AI-generated interpretations must be reviewed and verified by a licensed neurologist or healthcare professional in conjunction with clinical electromyography, patient history, and standard diagnostic criteria (such as the revised El Escorial or Gold Coast criteria).
