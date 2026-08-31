@@ -10,6 +10,7 @@ import SignalView from './components/SignalView'
 import { Attribution, Explanation, Readout } from './components/Details'
 import { EmptyStage, ErrorStage, HealthPanel, History, Working } from './components/Sidebars'
 import Chatbot from './components/Chatbot'
+import Credits from './components/Credits'
 import type { Health, PredictionResult, SampleSignal } from './types'
 
 const FALLBACK_DISCLAIMER =
@@ -26,6 +27,7 @@ export default function App() {
   const [samples, setSamples] = useState<SampleSignal[]>([])
   const [statusOpen, setStatusOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [creditsOpen, setCreditsOpen] = useState(false)
 
   const [result, setResult] = useState<PredictionResult | null>(null)
   const [history, setHistory] = useState<PredictionResult[]>([])
@@ -94,6 +96,7 @@ export default function App() {
           onToggleDetails={() => setStatusOpen((v) => !v)}
           chatOpen={chatOpen}
           onToggleChat={() => setChatOpen((v) => !v)}
+          onOpenCredits={() => setCreditsOpen(true)}
         />
         {showDemo && <DemoBanner />}
         <DisclaimerBar text={disclaimer} />
@@ -103,6 +106,8 @@ export default function App() {
           onClose={() => setChatOpen(false)}
           currentResult={result}
         />
+
+        <Credits open={creditsOpen} onClose={() => setCreditsOpen(false)} />
 
         <main className="shell">
           <div className="column column-rail">
@@ -174,7 +179,16 @@ export default function App() {
               Screening aid for research use. Every prediction here comes from an experimental
               model and is not a clinical determination.
             </p>
-            <p className="num">CNN · Florence-2 · XGBoost</p>
+            <p className="num">
+              CNN · Florence-2 · XGBoost ·{' '}
+              <button
+                type="button"
+                className="footer-credit-btn"
+                onClick={() => setCreditsOpen(true)}
+              >
+                Credits
+              </button>
+            </p>
           </div>
         </footer>
 
