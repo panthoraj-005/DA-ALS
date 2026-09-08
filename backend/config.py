@@ -96,11 +96,33 @@ ENABLE_FLORENCE = _env_bool("ENABLE_FLORENCE", True)  # may the VLM be used at a
 FLORENCE_DEFAULT = _env_bool("FLORENCE_DEFAULT", False)  # used when not requested
 LOAD_FLORENCE_AT_STARTUP = _env_bool("LOAD_FLORENCE_AT_STARTUP", True)
 
-# LLM explanation smoothing. Supports Gemini API (fast, 0 extra RAM) or local HuggingFace.
+# LLM explanation & chat. Supports Gemini, OpenAI, Anthropic, Groq, Ollama, OpenRouter.
 ENABLE_LLM = _env_bool("ENABLE_LLM", True)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini" if GEMINI_API_KEY else "local").strip().lower()
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.7-flash" if LLM_PROVIDER == "gemini" else "Qwen/Qwen2.5-1.5B-Instruct")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip()
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip().rstrip("/")
+
+LLM_PROVIDER = os.getenv(
+    "LLM_PROVIDER",
+    "gemini" if GEMINI_API_KEY else ("openai" if OPENAI_API_KEY else "gemini"),
+).strip().lower()
+
+LLM_MODEL = os.getenv(
+    "LLM_MODEL",
+    "gemini-3.1-flash-lite" if LLM_PROVIDER == "gemini" else (
+        "gpt-4o-mini" if LLM_PROVIDER == "openai" else (
+            "claude-3-5-haiku-20241022" if LLM_PROVIDER == "anthropic" else (
+                "llama-3.3-70b-versatile" if LLM_PROVIDER == "groq" else (
+                    "medgemma" if LLM_PROVIDER == "ollama" else "gemini-3.1-flash-lite"
+                )
+            )
+        )
+    )
+).strip()
 
 # Demo mode lets the whole app run without trained artifacts (random weights).
 # Every response is flagged `demo_mode: true` and the UI shows a loud banner.
