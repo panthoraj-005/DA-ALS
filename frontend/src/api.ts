@@ -1,4 +1,11 @@
-import { ApiError, type Health, type PredictionResult, type SampleSignal } from './types'
+import {
+  ApiError,
+  type AppSettings,
+  type Health,
+  type PredictionResult,
+  type SampleSignal,
+  type SettingsUpdatePayload,
+} from './types'
 
 // In dev, Vite proxies /api to the backend. In the container the API and the
 // built frontend share an origin, so the same relative base works there too.
@@ -18,9 +25,19 @@ function isOffline(error: unknown): boolean {
   return error instanceof TypeError || (error instanceof DOMException && error.name === 'AbortError')
 }
 
-async function request(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+async function request(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  // A caller-supplied signal (the chat's "Stop") aborts the same fetch the
+  // timeout does; the caller tells the two apart by checking its own signal.
+  const relay = () => controller.abort()
+  signal?.addEventListener('abort', relay)
 
   try {
     return await fetch(`${BASE}${path}`, { ...init, signal: controller.signal })
@@ -41,6 +58,7 @@ async function request(path: string, init: RequestInit, timeoutMs: number): Prom
     throw error
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', relay)
   }
 }
 
@@ -107,6 +125,9 @@ export async function sendChatMessage(
   message: string,
   history: { role: string; content: string }[],
   context?: Record<string, unknown>,
+  signal?: AbortSignal,
+  provider?: string,
+  model?: string,
 ): Promise<{ reply: string; suggestions?: string[] }> {
   return await unwrap<{ reply: string; suggestions?: string[] }>(
     await request(
@@ -114,9 +135,72 @@ export async function sendChatMessage(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history, context }),
+        body: JSON.stringify({ message, history, context, provider, model }),
       },
       45_000,
+      signal,
     ),
   )
 }
+
+export async function fetchSettings(): Promise<AppSettings> {
+  return await unwrap<AppSettings>(await request('/settings', {}, STATUS_TIMEOUT_MS))
+}
+
+export async function updateSettings(payload: SettingsUpdatePayload): Promise<AppSettings> {
+  return await unwrap<AppSettings>(
+    await request(
+      '/settings',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      STATUS_TIMEOUT_MS,
+    ),
+  )
+}
+
+export interface TestKeyOptions {
+  provider?: string
+  apiKey?: string
+  model?: string
+  baseUrl?: string
+}
+
+export async function testApiKey(
+  apiKeyOrOptions: string | TestKeyOptions,
+  legacyModel?: string,
+): Promise<{ valid: boolean; message: string }> {
+  let payload: Record<string, unknown>
+
+  if (typeof apiKeyOrOptions === 'string') {
+    payload = {
+      provider: 'gemini',
+      api_key: apiKeyOrOptions,
+      gemini_api_key: apiKeyOrOptions,
+      model: legacyModel,
+    }
+  } else {
+    payload = {
+      provider: apiKeyOrOptions.provider || 'gemini',
+      api_key: apiKeyOrOptions.apiKey,
+      gemini_api_key: apiKeyOrOptions.apiKey,
+      model: apiKeyOrOptions.model,
+      base_url: apiKeyOrOptions.baseUrl,
+    }
+  }
+
+  return await unwrap<{ valid: boolean; message: string }>(
+    await request(
+      '/settings/test-key',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      20_000,
+    ),
+  )
+}
+

@@ -240,84 +240,66 @@ LLM_SYSTEM = (
 )
 
 
-def generate_gemini_explanation(template: str) -> str:
-    """Generate clinical summary via Google Gemini API (zero RAM overhead, fast)."""
-    if not config.GEMINI_API_KEY:
-        return template
+import llm_client
 
-    models_to_try = [config.LLM_MODEL, "gemini-3.1-flash-lite"]
-    seen = set()
-    models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
 
-    prompt = f"{LLM_SYSTEM}\n\nTemplate to rewrite:\n{template}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 250,
-        },
-    }
-    data = json.dumps(payload).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": config.GEMINI_API_KEY,
-    }
-    ctx = ssl.create_default_context()
+def smooth_with_llm(reg: ModelRegistry, template: str) -> tuple[str, str]:
+    """
+    Smooth grounded template using configured AI provider or local HuggingFace model.
+    Returns (explanation_text, explanation_source).
+    """
+    prov = config.LLM_PROVIDER.lower()
 
-    for model_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    # 1. Cloud / Remote Provider path
+    if prov != "local" and llm_client.is_provider_configured(prov):
+        cat = llm_client.PROVIDER_CATALOG.get(prov, {})
+        prov_name = cat.get("name", prov.title())
+        model_name = config.LLM_MODEL or cat.get("default_model", "")
         try:
-            req = urllib.request.Request(url, data=data, headers=headers)
-            with urllib.request.urlopen(req, context=ctx, timeout=20) as response:
-                res_json = json.loads(response.read().decode("utf-8"))
-                text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                # Guardrail: preserve mandatory disclaimer
-                if "not a medical diagnosis" not in text.lower():
-                    text = f"{text} {config.DISCLAIMER}"
-                return text
-        except Exception as exc:
-            log.warning("Gemini model %s call failed (%s), trying fallback if available...", model_name, exc)
-
-    log.error("All Gemini API attempts failed, falling back to template.")
-    return template
-
-
-def smooth_with_llm(reg: ModelRegistry, template: str) -> str:
-    # 1. Cloud Gemini API path (fast, no local GPU/RAM footprint)
-    if config.LLM_PROVIDER == "gemini" and config.GEMINI_API_KEY:
-        return generate_gemini_explanation(template)
-
-    # 2. Local HuggingFace path
-    if reg.llm_model is None or reg.llm_tokenizer is None:
-        return template
-
-    try:
-        messages = [
-            {"role": "system", "content": LLM_SYSTEM},
-            {"role": "user", "content": template},
-        ]
-        text = reg.llm_tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        inputs = reg.llm_tokenizer(text, return_tensors="pt").to(reg.llm_model.device)
-
-        with torch.no_grad():
-            out = reg.llm_model.generate(
-                **inputs, max_new_tokens=220, do_sample=False, temperature=None, top_p=None
+            smoothed = llm_client.generate_llm_completion(
+                [{"role": "user", "content": f"Template to rewrite:\n{template}"}],
+                system_prompt=LLM_SYSTEM,
+                provider=prov,
+                model=model_name,
+                temperature=0.1,
+                max_tokens=280,
             )
+            if len(smoothed) >= 50:
+                if "not a medical diagnosis" not in smoothed.lower():
+                    smoothed = f"{smoothed} {config.DISCLAIMER}"
+                return smoothed, f"template + {model_name} ({prov_name})"
+        except Exception as exc:
+            log.warning("Multi-provider smoothing with %s (%s) failed: %s", prov, model_name, exc)
 
-        response = reg.llm_tokenizer.decode(
-            out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        ).strip()
+    # 2. Local HuggingFace model fallback
+    if reg.llm_model is not None and reg.llm_tokenizer is not None:
+        try:
+            messages = [
+                {"role": "system", "content": LLM_SYSTEM},
+                {"role": "user", "content": template},
+            ]
+            text = reg.llm_tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            inputs = reg.llm_tokenizer(text, return_tensors="pt").to(reg.llm_model.device)
 
-        # Guardrail: if the model dropped the disclaimer or produced something odd,
-        # keep the template. The template is always safe.
-        if len(response) < 60 or "not a medical diagnosis" not in response.lower():
-            return template
-        return response
-    except Exception as exc:
-        log.exception("LLM smoothing failed: %s", exc)
-        return template
+            with torch.no_grad():
+                out = reg.llm_model.generate(
+                    **inputs, max_new_tokens=220, do_sample=False, temperature=None, top_p=None
+                )
+
+            response = reg.llm_tokenizer.decode(
+                out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+            ).strip()
+
+            if len(response) >= 60:
+                if "not a medical diagnosis" not in response.lower():
+                    response = f"{response} {config.DISCLAIMER}"
+                return response, "template + Qwen2.5 wording pass"
+        except Exception as exc:
+            log.exception("LLM smoothing failed: %s", exc)
+
+    return template, "grounded template"
 
 
 # ---------------------------------------------------------------------------
@@ -366,19 +348,19 @@ def attach_explanations(
     result["top_shap_features"] = top_features
 
     template = build_template_explanation(result)
-    is_gemini = config.LLM_PROVIDER == "gemini" and bool(config.GEMINI_API_KEY)
-    is_local = reg.llm_model is not None
     want_llm = config.ENABLE_LLM if use_llm is None else bool(use_llm)
+    provider_available = (
+        (config.LLM_PROVIDER != "local" and llm_client.is_provider_configured(config.LLM_PROVIDER))
+        or reg.llm_model is not None
+    )
 
-    if want_llm and (is_gemini or is_local):
+    if want_llm and provider_available:
         t0 = time.perf_counter()
-        result["explanation"] = smooth_with_llm(reg, template)
-        result["explanation_source"] = (
-            f"template + {config.LLM_MODEL} (Gemini API)"
-            if is_gemini
-            else "template + Qwen2.5 wording pass"
-        )
+        smoothed, source = smooth_with_llm(reg, template)
+        result["explanation"] = smoothed
+        result["explanation_source"] = source
         timings["llm_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     else:
         result["explanation"] = template
         result["explanation_source"] = "grounded template"
+

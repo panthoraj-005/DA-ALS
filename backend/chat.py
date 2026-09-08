@@ -61,19 +61,31 @@ def parse_response_and_suggestions(raw_text: str) -> tuple[str, list[str]]:
     return cleaned, []
 
 
-def generate_chat_response(message: str, history: list[dict] | None = None, context: dict | None = None) -> tuple[str, list[str]]:
-    """Generate a response using Google Gemini API or local fallback."""
-    if not config.GEMINI_API_KEY:
+import llm_client
+
+def generate_chat_response(
+    message: str,
+    history: list[dict] | None = None,
+    context: dict | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[str, list[str]]:
+    """Generate a conversational response using the configured AI provider."""
+    active_prov = (provider or config.LLM_PROVIDER).lower()
+    cat_entry = llm_client.PROVIDER_CATALOG.get(active_prov, llm_client.PROVIDER_CATALOG["gemini"])
+
+    if cat_entry.get("requires_key", False) and not llm_client.is_provider_configured(active_prov):
+        env_key = cat_entry.get("env_key", "API_KEY")
         return (
-            "The AI Assistant requires an active Gemini API key. "
-            "Configure GEMINI_API_KEY in .env to enable conversational capabilities.",
-            []
+            f"The Clinical AI Assistant requires an active API key for {cat_entry['name']}. "
+            f"Please open Platform Settings and configure your {env_key} (or update .env) "
+            "to enable conversational capabilities.",
+            [],
         )
 
     history = history or []
-    contents = []
 
-    # Build context string
+    # Build patient screening context string
     context_str = ""
     if context:
         parts = []
@@ -99,59 +111,34 @@ def generate_chat_response(message: str, history: list[dict] | None = None, cont
             parts.append(f"Summary: {context['explanation']}")
         context_str = "\n".join(parts)
 
-    system_block = f"SYSTEM INSTRUCTIONS:\n{SYSTEM_PROMPT}"
+    full_system_prompt = SYSTEM_PROMPT
     if context_str:
-        system_block += f"\n\nCURRENT PATIENT SCREENING CONTEXT:\n{context_str}"
+        full_system_prompt += f"\n\nCURRENT PATIENT SCREENING CONTEXT:\n{context_str}"
 
-    first_user_added = False
-
-    for item in history[-6:]:
-        role = "user" if item.get("role") == "user" else "model"
+    messages = []
+    for item in history[-8:]:
+        role = "user" if item.get("role") == "user" else "assistant"
         text = str(item.get("content", "")).strip()
-        if not text:
-            continue
-        if role == "user" and not first_user_added:
-            contents.append({"role": "user", "parts": [{"text": f"{system_block}\n\nUser Query: {text}"}]})
-            first_user_added = True
-        else:
-            contents.append({"role": role, "parts": [{"text": text}]})
+        if text:
+            messages.append({"role": role, "content": text})
 
-    if not first_user_added:
-        contents.append({"role": "user", "parts": [{"text": f"{system_block}\n\nUser Query: {message}"}]})
-    else:
-        contents.append({"role": "user", "parts": [{"text": message}]})
+    messages.append({"role": "user", "content": message})
 
-    models_to_try = [config.LLM_MODEL, "gemini-3.1-flash-lite", "gemini-3.7-flash"]
-    seen = set()
-    models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
+    try:
+        raw_text = llm_client.generate_llm_completion(
+            messages,
+            system_prompt=full_system_prompt,
+            provider=active_prov,
+            model=model or config.LLM_MODEL,
+            temperature=0.2,
+            max_tokens=650,
+        )
+        return parse_response_and_suggestions(raw_text)
+    except Exception as exc:
+        log.warning("AI provider (%s) chat call failed: %s", active_prov, exc)
+        return (
+            f"The assistant is temporarily unable to reach {cat_entry['name']}: {exc}. "
+            "Please check your API key and network connection in Settings.",
+            [],
+        )
 
-    payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 600,
-        },
-    }
-    data = json.dumps(payload).encode("utf-8")
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": config.GEMINI_API_KEY,
-    }
-    ctx = ssl.create_default_context()
-
-    for model_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-        try:
-            req = urllib.request.Request(url, data=data, headers=headers)
-            with urllib.request.urlopen(req, context=ctx, timeout=20) as response:
-                res_json = json.loads(response.read().decode("utf-8"))
-                text = res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-                return parse_response_and_suggestions(text)
-        except Exception as exc:
-            log.warning("Chatbot model %s call failed (%s), trying fallback...", model_name, exc)
-
-    return (
-        "The assistant is temporarily unable to reach the Gemini API. "
-        "Please check your internet connection or try again shortly.",
-        []
-    )

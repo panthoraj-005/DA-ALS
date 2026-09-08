@@ -1,7 +1,10 @@
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-exclude = [".venv", "__pycache__", "outputs"]
+# train_*.py are one-shot offline scripts lifted from the notebook. They are not
+# imported by the service and are kept notebook-shaped on purpose, so linting
+# them would only produce noise CI has to ignore.
+exclude = [".venv", "__pycache__", "outputs", "train_*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "ARG", "SIM", "RUF"]

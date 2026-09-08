@@ -69,7 +69,9 @@ def _read_csv(data: bytes, source: str) -> np.ndarray:
         raise SignalFormatError(f"{source} could not be parsed as CSV: {exc}") from exc
 
     # A header row leaves a first row that is not numeric — drop it and retry.
-    if frame.shape[0] > 1 and not np.issubdtype(frame.dtypes.iloc[0], np.number):
+    # pandas' own check, not np.issubdtype: the latter raises TypeError on the
+    # StringDtype that recent pandas infers for a text column.
+    if frame.shape[0] > 1 and not pd.api.types.is_numeric_dtype(frame.dtypes.iloc[0]):
         frame = pd.read_csv(io.StringIO(text))
 
     numeric = frame.apply(pd.to_numeric, errors="coerce")

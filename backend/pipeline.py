@@ -284,6 +284,18 @@ def run_pipeline(
     render_signal_image(processed, abnormal_regions, signal_image, title=source_name)
     timings["render_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
+    # --- audio samples -----------------------------------------------------
+    # The same preprocessed trace the image shows, dumped as raw little-endian
+    # float32 so the browser can play it through the Web Audio API. Purely an
+    # output artifact: nothing downstream reads it back.
+    audio_path = config.OUTPUT_DIR / f"{record_id}_signal.f32"
+    audio_url = None
+    try:
+        audio_path.write_bytes(np.ascontiguousarray(processed, dtype="<f4").tobytes())
+        audio_url = f"/audio/{record_id}"
+    except OSError as exc:
+        log.warning("could not write audio samples for %s: %s", record_id, exc)
+
     # --- CNN ---------------------------------------------------------------
     t0 = time.perf_counter()
     cnn_prob, cnn_feat = run_cnn(reg, processed)
@@ -371,6 +383,8 @@ def run_pipeline(
         "segment_energies": [round(float(s), 6) for s in seg_scores],
         "signal_length": len(processed),
         "signal_image_url": f"/images/{signal_image.name}",
+        "audio_url": audio_url,
+        "audio_sample_rate": float(config.FS),
         "gradcam_image_url": None,
         "top_shap_feature": None,
         "top_shap_features": None,
