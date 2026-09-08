@@ -14,7 +14,8 @@ interface Props {
   detailsOpen: boolean
   onToggleChat?: () => void
   chatOpen?: boolean
-  onOpenCredits: () => void
+  onOpenCredits?: () => void
+  onOpenSettings?: () => void
 }
 
 export default function Masthead({
@@ -25,6 +26,7 @@ export default function Masthead({
   onToggleChat,
   chatOpen,
   onOpenCredits,
+  onOpenSettings,
 }: Props) {
   const status = health ? STATUS_COPY[health.status] : null
 
@@ -64,9 +66,21 @@ export default function Masthead({
           <button type="button" className="tag tag-button" onClick={onToggleDetails}>
             {detailsOpen ? 'Hide status' : 'Model status'}
           </button>
-          <button type="button" className="tag tag-button" onClick={onOpenCredits}>
-            Credits
-          </button>
+          {onOpenCredits && (
+            <button type="button" className="tag tag-button" onClick={onOpenCredits}>
+              Credits
+            </button>
+          )}
+          {onOpenSettings && (
+            <button
+              type="button"
+              className="tag tag-button"
+              onClick={onOpenSettings}
+              title="Configure AI model & API keys"
+            >
+              Settings
+            </button>
+          )}
           {onToggleChat && (
             <button
               type="button"
