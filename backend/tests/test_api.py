@@ -271,3 +271,81 @@ def test_store_rejects_a_hostile_id():
     import store
 
     assert store.load("../../etc/passwd") is None
+
+
+# --- multi-provider settings and assistant ---------------------------------
+def test_get_settings_returns_providers_and_catalog(client):
+    res = client.get("/settings")
+    assert res.status_code == 200
+    data = res.json()
+    assert "providers" in data
+    provider_ids = {p["id"] for p in data["providers"]}
+    assert {"gemini", "openai", "anthropic", "groq", "openrouter", "ollama", "local"}.issubset(provider_ids)
+    assert "available_models" in data
+    assert "llm_provider" in data
+
+
+def test_update_settings_multi_provider(client, monkeypatch):
+    res = client.post(
+        "/settings",
+        json={
+            "llm_provider": "groq",
+            "llm_model": "llama-3.3-70b-versatile",
+            "groq_api_key": "gsk_mock_test_key_12345",
+            "ollama_base_url": "http://127.0.0.1:11434",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["llm_provider"] == "groq"
+    assert data["llm_model"] == "llama-3.3-70b-versatile"
+    assert config.GROQ_API_KEY == "gsk_mock_test_key_12345"
+    assert config.OLLAMA_BASE_URL == "http://127.0.0.1:11434"
+
+
+def test_test_key_endpoint_validation(client):
+    # Missing key for provider requiring key
+    res = client.post("/settings/test-key", json={"provider": "anthropic", "api_key": ""})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["valid"] is False
+    assert "No API key" in data["message"] or "valid API key" in data["message"]
+
+
+def test_chat_endpoint_missing_key_guidance(client, monkeypatch):
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(config, "LLM_PROVIDER", "openai")
+    res = client.post("/chat", json={"message": "What does this EMG trace indicate?"})
+    assert res.status_code == 200
+    data = res.json()
+    assert "OpenAI API key" in data["reply"] or "Settings" in data["reply"]
+
+
+def test_chat_endpoint_mock_provider(client, monkeypatch):
+    import llm_client
+
+    def _mock_gen(messages, **kwargs):
+        return (
+            "The EMG signal displays normal motor unit potentials with no denervation signs.\n\n"
+            "---\n"
+            "### Related inquiries:\n"
+            "- What is the normal recruitment ratio?\n"
+            "- How does Grad-CAM highlight waveform peaks?"
+        )
+
+    monkeypatch.setattr(llm_client, "generate_llm_completion", _mock_gen)
+    monkeypatch.setattr(llm_client, "is_provider_configured", lambda p: True)
+
+    res = client.post(
+        "/chat",
+        json={
+            "message": "Analyze this waveform",
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "denervation" in data["reply"]
+    assert len(data["suggestions"]) >= 1
+
