@@ -11,6 +11,7 @@ import { Attribution, Explanation, Readout } from './components/Details'
 import { EmptyStage, ErrorStage, HealthPanel, History, Working } from './components/Sidebars'
 import Chatbot from './components/Chatbot'
 import Credits from './components/Credits'
+import SettingsModal from './components/SettingsModal'
 import type { Health, PredictionResult, SampleSignal } from './types'
 
 const FALLBACK_DISCLAIMER =
@@ -28,6 +29,7 @@ export default function App() {
   const [statusOpen, setStatusOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const [result, setResult] = useState<PredictionResult | null>(null)
   const [history, setHistory] = useState<PredictionResult[]>([])
@@ -97,17 +99,24 @@ export default function App() {
           chatOpen={chatOpen}
           onToggleChat={() => setChatOpen((v) => !v)}
           onOpenCredits={() => setCreditsOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
         {showDemo && <DemoBanner />}
         <DisclaimerBar text={disclaimer} />
+
+        <Credits open={creditsOpen} onClose={() => setCreditsOpen(false)} />
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          onSettingsSaved={() => void loadStatus()}
+        />
 
         <Chatbot
           open={chatOpen}
           onClose={() => setChatOpen(false)}
           currentResult={result}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-
-        <Credits open={creditsOpen} onClose={() => setCreditsOpen(false)} />
 
         <main className="shell">
           <div className="column column-rail">
@@ -183,14 +192,30 @@ export default function App() {
               CNN · Florence-2 · XGBoost ·{' '}
               <button
                 type="button"
-                className="footer-credit-btn"
+                className="credits-link credits-link-button"
                 onClick={() => setCreditsOpen(true)}
+                aria-haspopup="dialog"
               >
                 Credits
               </button>
             </p>
           </div>
         </footer>
+
+        {/* Floating Credits Button */}
+        <button
+          type="button"
+          className="credits-popup-btn"
+          onClick={() => setCreditsOpen(true)}
+          aria-haspopup="dialog"
+          title="Authors, tooling, and licence"
+        >
+          <svg className="credits-popup-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 16v-4M12 8h.01" />
+          </svg>
+          <span className="credits-popup-label">Credits</span>
+        </button>
 
         {/* Floating AI Popup Button */}
         <button
