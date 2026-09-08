@@ -88,6 +88,55 @@ export interface ChatMessage {
   content: string
   timestamp: Date
   suggestions?: string[]
+  /** Set on an assistant message that reports a failed request, so it can offer a retry. */
+  failedQuery?: string
+}
+
+export interface ProviderModel {
+  id: string
+  name: string
+}
+
+export interface ProviderInfo {
+  id: string
+  name: string
+  description: string
+  env_key: string
+  requires_key: boolean
+  key_url: string
+  configured: boolean
+  key_masked: string
+  default_model: string
+  models: ProviderModel[]
+}
+
+export interface AppSettings {
+  llm_provider: string
+  llm_model: string
+  openai_base_url?: string
+  ollama_base_url?: string
+  gemini_api_key_masked: string
+  gemini_api_key_configured: boolean
+  enable_llm: boolean
+  enable_florence: boolean
+  florence_default: boolean
+  available_models: { id: string; name: string }[]
+  available_providers: { id: string; name: string }[]
+  providers?: ProviderInfo[]
+}
+
+export interface SettingsUpdatePayload {
+  gemini_api_key?: string
+  openai_api_key?: string
+  openai_base_url?: string
+  anthropic_api_key?: string
+  groq_api_key?: string
+  openrouter_api_key?: string
+  ollama_base_url?: string
+  llm_model?: string
+  llm_provider?: string
+  enable_llm?: boolean
+  florence_default?: boolean
 }
 
 export class ApiError extends Error {
@@ -96,3 +145,4 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 }
+
