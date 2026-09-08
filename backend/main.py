@@ -28,6 +28,7 @@ import models as model_module
 import signal_io
 import store
 import chat
+import llm_client
 from middleware import (
     RateLimitMiddleware,
     RequestContextMiddleware,
@@ -303,7 +304,7 @@ async def health():
             "full_fusion": reg.fusion_ready,
             "gradcam": reg.cnn_ready,
             "shap": reg.shap_explainer is not None,
-            "llm_explanation": reg.llm_model is not None or (config.LLM_PROVIDER == "gemini" and bool(config.GEMINI_API_KEY)),
+            "llm_explanation": reg.llm_model is not None or (config.ENABLE_LLM and llm_client.is_provider_configured(config.LLM_PROVIDER)),
         },
         "artifacts": reg.status_list(),
         "config": {
@@ -498,6 +499,8 @@ class ChatRequestBody(BaseModel):
     message: str
     history: list[ChatMessageItem] = []
     context: dict | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 @api_router.post("/chat", tags=["assistant"])
@@ -511,8 +514,191 @@ async def chat_endpoint(body: ChatRequestBody):
         message=body.message.strip(),
         history=history_dicts,
         context=body.context,
+        provider=body.provider,
+        model=body.model,
     )
     return {"reply": reply, "suggestions": suggestions}
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Settings & Model Configuration
+# ---------------------------------------------------------------------------
+class SettingsUpdateRequest(BaseModel):
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    anthropic_api_key: str | None = None
+    groq_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    ollama_base_url: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    enable_llm: bool | None = None
+    florence_default: bool | None = None
+
+
+class TestKeyRequest(BaseModel):
+    provider: str = "gemini"
+    api_key: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    gemini_api_key: str | None = None
+
+
+def _mask_key(k: str) -> str:
+    if not k:
+        return ""
+    if len(k) <= 8:
+        return "********"
+    return f"{k[:4]}...{k[-4:]}"
+
+
+def _update_env_file(updates: dict[str, str]) -> None:
+    env_path = config.PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        new_lines = []
+        found_keys = set()
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k = stripped.split("=", 1)[0].strip()
+                if k in updates:
+                    new_lines.append(f"{k}={updates[k]}")
+                    found_keys.add(k)
+                    continue
+            new_lines.append(line)
+        for k, v in updates.items():
+            if k not in found_keys:
+                new_lines.append(f"{k}={v}")
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    except Exception as exc:
+        log.warning("failed to write .env file: %s", exc)
+
+
+@api_router.get("/settings", tags=["settings"])
+async def get_settings():
+    providers_info = []
+    for prov_id, meta in llm_client.PROVIDER_CATALOG.items():
+        key_val = llm_client.get_provider_key(prov_id)
+        is_conf = llm_client.is_provider_configured(prov_id)
+        masked = _mask_key(key_val) if meta.get("requires_key", True) else key_val
+        providers_info.append({
+            "id": prov_id,
+            "name": meta["name"],
+            "description": meta["description"],
+            "env_key": meta["env_key"],
+            "requires_key": meta["requires_key"],
+            "key_url": meta["key_url"],
+            "configured": is_conf,
+            "key_masked": masked,
+            "default_model": meta["default_model"],
+            "models": meta["models"],
+        })
+
+    active_entry = llm_client.PROVIDER_CATALOG.get(
+        config.LLM_PROVIDER, llm_client.PROVIDER_CATALOG["gemini"]
+    )
+
+    return {
+        "llm_provider": config.LLM_PROVIDER,
+        "llm_model": config.LLM_MODEL,
+        "openai_base_url": getattr(config, "OPENAI_BASE_URL", ""),
+        "ollama_base_url": config.OLLAMA_BASE_URL,
+        "gemini_api_key_masked": _mask_key(config.GEMINI_API_KEY),
+        "gemini_api_key_configured": bool(config.GEMINI_API_KEY),
+        "enable_llm": config.ENABLE_LLM,
+        "enable_florence": config.ENABLE_FLORENCE,
+        "florence_default": config.FLORENCE_DEFAULT,
+        "available_models": active_entry.get("models", []),
+        "available_providers": [
+            {"id": p["id"], "name": p["name"]} for p in llm_client.PROVIDER_CATALOG.values()
+        ],
+        "providers": providers_info,
+    }
+
+
+@api_router.post("/settings", tags=["settings"])
+async def update_settings(body: SettingsUpdateRequest):
+    env_updates: dict[str, str] = {}
+
+    if body.gemini_api_key is not None:
+        clean_key = body.gemini_api_key.strip()
+        config.GEMINI_API_KEY = clean_key
+        env_updates["GEMINI_API_KEY"] = clean_key
+
+    if body.openai_api_key is not None:
+        clean_key = body.openai_api_key.strip()
+        config.OPENAI_API_KEY = clean_key
+        env_updates["OPENAI_API_KEY"] = clean_key
+
+    if body.openai_base_url is not None:
+        clean_url = body.openai_base_url.strip()
+        config.OPENAI_BASE_URL = clean_url
+        env_updates["OPENAI_BASE_URL"] = clean_url
+
+    if body.anthropic_api_key is not None:
+        clean_key = body.anthropic_api_key.strip()
+        config.ANTHROPIC_API_KEY = clean_key
+        env_updates["ANTHROPIC_API_KEY"] = clean_key
+
+    if body.groq_api_key is not None:
+        clean_key = body.groq_api_key.strip()
+        config.GROQ_API_KEY = clean_key
+        env_updates["GROQ_API_KEY"] = clean_key
+
+    if body.openrouter_api_key is not None:
+        clean_key = body.openrouter_api_key.strip()
+        config.OPENROUTER_API_KEY = clean_key
+        env_updates["OPENROUTER_API_KEY"] = clean_key
+
+    if body.ollama_base_url is not None:
+        clean_url = body.ollama_base_url.strip().rstrip("/")
+        config.OLLAMA_BASE_URL = clean_url
+        env_updates["OLLAMA_BASE_URL"] = clean_url
+
+    if body.llm_provider is not None and body.llm_provider.strip():
+        clean_prov = body.llm_provider.strip().lower()
+        config.LLM_PROVIDER = clean_prov
+        env_updates["LLM_PROVIDER"] = clean_prov
+
+    if body.llm_model is not None and body.llm_model.strip():
+        clean_model = body.llm_model.strip()
+        config.LLM_MODEL = clean_model
+        env_updates["LLM_MODEL"] = clean_model
+
+    if body.enable_llm is not None:
+        config.ENABLE_LLM = body.enable_llm
+        env_updates["ENABLE_LLM"] = "1" if body.enable_llm else "0"
+
+    if body.florence_default is not None:
+        config.FLORENCE_DEFAULT = body.florence_default
+        env_updates["FLORENCE_DEFAULT"] = "1" if body.florence_default else "0"
+
+    if env_updates:
+        await asyncio.to_thread(_update_env_file, env_updates)
+
+    log.info("updated dynamic settings", extra={"keys_modified": list(env_updates.keys())})
+    return await get_settings()
+
+
+@api_router.post("/settings/test-key", tags=["settings"])
+async def test_api_key(body: TestKeyRequest):
+    prov = (body.provider or "gemini").lower()
+    key = body.api_key if body.api_key is not None else body.gemini_api_key
+    model = body.model
+
+    res = await asyncio.to_thread(
+        llm_client.test_provider_connection,
+        provider=prov,
+        api_key=key,
+        model=model,
+        base_url=body.base_url,
+    )
+    return res
+
 
 
 @api_router.get("/api", include_in_schema=False)
