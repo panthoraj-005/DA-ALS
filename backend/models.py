@@ -331,10 +331,19 @@ def load_llm(reg: ModelRegistry) -> None:
         reg.status["llm"] = st
         return
 
-    if config.LLM_PROVIDER == "gemini" and config.GEMINI_API_KEY:
-        st.loaded = True
-        st.path = f"Google Gemini API ({config.LLM_MODEL})"
-        st.detail = "active API provider for clinical summaries"
+    import llm_client
+
+    if config.LLM_PROVIDER != "local":
+        cat = llm_client.PROVIDER_CATALOG.get(config.LLM_PROVIDER, {})
+        prov_name = cat.get("name", config.LLM_PROVIDER.title())
+        is_conf = llm_client.is_provider_configured(config.LLM_PROVIDER)
+        st.loaded = is_conf
+        st.path = f"{prov_name} ({config.LLM_MODEL})"
+        st.detail = (
+            "active API provider for clinical summaries"
+            if is_conf
+            else f"API key required for {prov_name} (configure in Settings)"
+        )
         reg.status["llm"] = st
         return
 
