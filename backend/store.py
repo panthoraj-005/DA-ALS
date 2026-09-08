@@ -33,6 +33,17 @@ def _path(record_id: str) -> Path:
     return config.OUTPUT_DIR / f"{record_id}{SUFFIX}"
 
 
+def artifact_path(record_id: str, suffix: str) -> Path:
+    """
+    OUTPUT_DIR path for a generated artifact of a record, e.g. "_signal.f32".
+
+    Shares _path's id validation, so a hostile record id cannot walk out of
+    OUTPUT_DIR through this helper either.
+    """
+    _path(record_id)  # validates; raises ValueError on a hostile id
+    return config.OUTPUT_DIR / f"{record_id}{suffix}"
+
+
 def save(result: dict) -> dict:
     """Persist a result and return the public (underscore-free) view of it."""
     public = {k: v for k, v in result.items() if not k.startswith("_")}
@@ -86,7 +97,7 @@ def sweep(ttl_minutes: int | None = None) -> int:
         return 0
 
     for path in entries:
-        if path.suffix not in {".png", ".pdf", ".json", ".tmp"} and not path.name.endswith(SUFFIX):
+        if path.suffix not in {".png", ".pdf", ".json", ".tmp", ".f32"} and not path.name.endswith(SUFFIX):
             continue
         try:
             if path.is_file() and path.stat().st_mtime < cutoff:
@@ -112,7 +123,7 @@ def purge_all() -> int:
         return 0
 
     for path in entries:
-        if path.suffix not in {".png", ".pdf", ".json", ".tmp"} and not path.name.endswith(SUFFIX):
+        if path.suffix not in {".png", ".pdf", ".json", ".tmp", ".f32"} and not path.name.endswith(SUFFIX):
             continue
         try:
             if path.is_file():
